@@ -1,153 +1,168 @@
-import tkinter as tk
+# ==============================================================================
+# DivyOS - Taskbar (HyperOS Dock Edition)
+# ==============================================================================
+
+import os
+import sys
 import time
+import tkinter as tk
 
-from config import (
-    TASKBAR_COLOR,
-    TEXT_COLOR,
-    ACCENT_COLOR,
-    BORDER_COLOR,
-    TASKBAR_HEIGHT,
-    DEFAULT_FONT,
-    RADIUS_LARGE,
-    RADIUS_MEDIUM,
-)
-
+from config import DEFAULT_FONT, RADIUS_LARGE, TASKBAR_HEIGHT
+from core.theme import get_color, get_theme
 from core.utils import draw_rounded_rect
 
-# Pillow is optional but required for a PNG/ICO Start logo.
-# If it isn't installed, the Start button falls back to the ⊞ symbol.
+# Optional Pillow handling for icons
 try:
     from PIL import Image, ImageTk
+
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
 
-import os
-import sys
-
 
 class Taskbar:
 
-    START_LOGO_SIZE = (22, 22)
-    MARGIN = 12          # gap from screen edges, floating pill effect
-    PILL_PADDING = 6      # inner padding around buttons
+    START_LOGO_SIZE = (24, 24)
+    MARGIN = 16  # Floating bottom margin
+    PILL_PADDING = 6
 
     def __init__(self, root, start_callback):
 
         self.root = root
         self.start_logo_image = None
+        self.running_app_buttons = {}
 
-        # =========================
-        # Outer wrapper (transparent, holds the floating pill)
-        # =========================
-        self.wrapper = tk.Frame(root, bg=root["bg"], height=TASKBAR_HEIGHT + self.MARGIN)
+        # Fetch theme colors dynamically
+        bg_color = get_color("bg")
+        taskbar_color = get_color("taskbar")
+        text_color = get_color("text")
+        accent_color = get_color("accent")
+        border_color = get_color("border")
+
+        # ======================================================================
+        # Outer Wrapper (Transparent background for floating Dock effect)
+        # ======================================================================
+        self.wrapper = tk.Frame(
+            root, bg=bg_color, height=TASKBAR_HEIGHT + self.MARGIN
+        )
         self.wrapper.pack(side="bottom", fill="x")
         self.wrapper.pack_propagate(False)
 
-        # =========================
-        # Rounded Canvas Pill
-        # =========================
+        # ======================================================================
+        # Rounded Canvas Pill (HyperOS Dock Background)
+        # ======================================================================
         self.canvas = tk.Canvas(
             self.wrapper,
             height=TASKBAR_HEIGHT,
-            bg=root["bg"],
-            highlightthickness=0
+            bg=bg_color,
+            highlightthickness=0,
         )
-        self.canvas.pack(fill="x", padx=self.MARGIN, pady=(0, self.MARGIN // 2))
+        self.canvas.pack(
+            fill="x", padx=self.MARGIN * 2, pady=(0, self.MARGIN // 2)
+        )
 
         self.canvas.bind("<Configure>", self._redraw_pill)
 
-        # =========================
-        # Content frame placed ON TOP of the rounded canvas
-        # =========================
-        self.frame = tk.Frame(self.canvas, bg=TASKBAR_COLOR)
+        # ======================================================================
+        # Content Frame (Placed ON TOP of Rounded Canvas)
+        # ======================================================================
+        self.frame = tk.Frame(self.canvas, bg=taskbar_color)
         self.canvas_window = self.canvas.create_window(
             0, 0, window=self.frame, anchor="nw"
         )
 
-        # =========================
-        # Start Button
-        # =========================
+        # ======================================================================
+        # Left Section: HyperOS Launcher Button
+        # ======================================================================
         logo = self._load_start_logo()
 
         if logo is not None:
             self.start_btn = tk.Button(
                 self.frame,
                 image=logo,
-                bg=TASKBAR_COLOR,
+                bg=taskbar_color,
                 bd=0,
                 highlightthickness=0,
                 relief="flat",
-                activebackground=ACCENT_COLOR,
+                activebackground=accent_color,
                 cursor="hand2",
-                command=start_callback
+                command=start_callback,
             )
             self.start_btn.image = logo
         else:
             self.start_btn = tk.Button(
                 self.frame,
-                text="⊞",
-                font=("Segoe UI", 16, "bold"),
-                bg=TASKBAR_COLOR,
-                fg=TEXT_COLOR,
+                text="✦",  # Modern clean symbol for HyperOS launcher
+                font=("Segoe UI Symbol", 16, "bold"),
+                bg=taskbar_color,
+                fg=accent_color,
                 bd=0,
                 highlightthickness=0,
                 relief="flat",
-                activebackground=ACCENT_COLOR,
-                activeforeground=TEXT_COLOR,
+                activebackground=get_color("hover"),
+                activeforeground=accent_color,
                 cursor="hand2",
-                command=start_callback
+                command=start_callback,
             )
 
-        self.start_btn.pack(side="left", padx=(18, 10), pady=10)
-        self._add_hover_effect(self.start_btn, ACCENT_COLOR, TASKBAR_COLOR)
-
-        # =========================
-        # Running Apps
-        # =========================
-        self.apps_frame = tk.Frame(self.frame, bg=TASKBAR_COLOR)
-        self.apps_frame.pack(side="left", padx=10)
-
-        # =========================
-        # Clock
-        # =========================
-        self.clock = tk.Label(
-            self.frame,
-            bg=TASKBAR_COLOR,
-            fg=TEXT_COLOR,
-            font=DEFAULT_FONT
+        self.start_btn.pack(side="left", padx=(16, 12), pady=8)
+        self._add_hover_effect(
+            self.start_btn, get_color("hover"), taskbar_color
         )
-        self.clock.pack(side="right", padx=18)
+
+        # ======================================================================
+        # Middle Section: Centered Running Apps Dock
+        # ======================================================================
+        self.apps_frame = tk.Frame(self.frame, bg=taskbar_color)
+        self.apps_frame.pack(side="left", expand=True, padx=10)
+
+        # ======================================================================
+        # Right Section: Status Bar & Clock (HyperOS Style)
+        # ======================================================================
+        self.status_frame = tk.Frame(self.frame, bg=taskbar_color)
+        self.status_frame.pack(side="right", padx=(0, 16))
+
+        self.clock = tk.Label(
+            self.status_frame,
+            bg=taskbar_color,
+            fg=text_color,
+            font=(get_color("font_family"), 10, "bold"),
+        )
+        self.clock.pack(side="right")
 
         self.update_clock()
 
-    # ==========================
+    # ==========================================================================
     # Rounded Pill Rendering
-    # ==========================
+    # ==========================================================================
 
     def _redraw_pill(self, event=None):
-        """Redraws the rounded taskbar background whenever it resizes."""
+        """Redraws the rounded taskbar background with HyperOS Glass aesthetic."""
         self.canvas.delete("pill")
 
         width = self.canvas.winfo_width()
         height = TASKBAR_HEIGHT
 
         draw_rounded_rect(
-            self.canvas, 0, 0, width, height,
-            radius=RADIUS_LARGE,
-            fill=TASKBAR_COLOR,
-            outline=BORDER_COLOR,
+            self.canvas,
+            0,
+            0,
+            width,
+            height,
+            radius=get_color("corner_radius"),
+            fill=get_color("taskbar"),
+            outline=get_color("border"),
             width=1,
-            tags="pill"
+            tags="pill",
         )
 
         self.canvas.tag_lower("pill")
         self.canvas.itemconfig(self.canvas_window, width=width, height=height)
         self.canvas.coords(self.canvas_window, 0, 0)
 
-    # ==========================
+    # ==========================================================================
     # Start Logo Loading
-    # ==========================
+    # ==========================================================================
 
     def _get_base_path(self):
         if getattr(sys, "frozen", False):
@@ -178,35 +193,51 @@ class Taskbar:
 
         return None
 
-    # ==========================
-    # Helpers
-    # ==========================
+    # ==========================================================================
+    # Helpers & App Dock Controls
+    # ==========================================================================
 
     def _add_hover_effect(self, widget, hover_bg, normal_bg):
         widget.bind("<Enter>", lambda e: widget.config(bg=hover_bg))
         widget.bind("<Leave>", lambda e: widget.config(bg=normal_bg))
 
     def update_clock(self):
-        self.clock.config(text=time.strftime("%d/%m/%Y   %H:%M"))
+        """HyperOS Time Format (HH:MM - DD MMM)"""
+        current_time = time.strftime("%H:%M  |  %d %b")
+        self.clock.config(text=current_time)
         self.root.after(1000, self.update_clock)
 
     def add_running_app(self, name, callback):
+        """Adds a new app tile to the central dock with HyperOS styling."""
+        taskbar_color = get_color("taskbar")
+        accent_color = get_color("accent")
+        hover_color = get_color("hover")
+        text_color = get_color("text")
 
         btn = tk.Button(
             self.apps_frame,
-            text=name,
-            bg=TASKBAR_COLOR,
-            fg=TEXT_COLOR,
+            text=f"•  {name}",
+            bg=taskbar_color,
+            fg=text_color,
             bd=0,
             highlightthickness=0,
             relief="flat",
-            padx=14,
-            pady=8,
-            activebackground=ACCENT_COLOR,
-            activeforeground=TEXT_COLOR,
+            padx=12,
+            pady=6,
+            font=(get_color("font_family"), 9, "bold"),
+            activebackground=hover_color,
+            activeforeground=accent_color,
             cursor="hand2",
-            command=callback
+            command=callback,
         )
-        btn.pack(side="left", padx=4)
-        self._add_hover_effect(btn, ACCENT_COLOR, TASKBAR_COLOR)
+        btn.pack(side="left", padx=3)
+        self._add_hover_effect(btn, hover_color, taskbar_color)
+
+        self.running_app_buttons[name] = btn
         return btn
+
+    def remove_running_app(self, name):
+        """Removes an app tile when closed."""
+        if name in self.running_app_buttons:
+            self.running_app_buttons[name].destroy()
+            del self.running_app_buttons[name]
